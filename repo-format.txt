@@ -4,6 +4,7 @@ rag-project/
 │  ├─ processed/             # токенизированные страницы, chunks.csv
 │  └─ submissions/           # submit.csv версии
 ├─ notebooks/                # эксперименты
+│  └─ porn/
 ├─ src/			     # основной сурсик
 │  ├─ preprocessing/
 │  │  ├─ clean.py
