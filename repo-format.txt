@@ -1,0 +1,36 @@
+rag-project/
+├─ data/
+│  ├─ raw/                   # raw CSV: Questions.csv, Websites.csv
+│  ├─ processed/             # токенизированные страницы, chunks.csv
+│  └─ submissions/           # submit.csv версии
+├─ notebooks/                # эксперименты
+├─ src/			     # основной сурсик
+│  ├─ preprocessing/
+│  │  ├─ clean.py
+│  │  ├─ chunker.py
+│  ├─ embedding/
+│  │  ├─ embedder.py
+│  ├─ indexer/
+│  │  ├─ faiss_index.py
+│  ├─ retriever/
+│  │  ├─ ann_search.py
+│  ├─ reranker/
+│  │  ├─ cross_encoder.py
+│  ├─ generator/
+│  │  ├─ prompt_templates.py
+│  │  ├─ generate.py
+│  ├─ eval/
+│  │  ├─ hit_at_k.py
+│  └─ api/
+│     ├─ app.py              # FastAPI endpoint (retrieve + answer)
+├─ tests/
+│  ├─ unit/
+├─ configs/
+│  ├─ default.yaml
+│  └─ experiments/
+├─ docker/
+│  ├─ Dockerfile
+│  └─ docker-compose.yml
+├─ requirements.txt
+├─ Makefile
+└─ README.md
