@@ -5,7 +5,7 @@
 Вход: data/raw/websites_updated.xlsx
 Выход: data/processed/chunks.csv
 
-Особенности:
+Особенности и изменения:
 - Работает с .xlsx (через openpyxl)
 - Контекстный префикс: "kind: {kind}; title: {title}; text: {text}"
 - Глубокая очистка: ?oirutpspid=, tel., footer-фразы, JSON-фрагменты
