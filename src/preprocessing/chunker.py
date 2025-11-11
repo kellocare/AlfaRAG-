@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 # src/preprocessing/chunker.py
 """
-Чанкинг websites_updated.xlsx →
-  - data/processed/chunks.csv
-  - data/processed/chunks.jsonl (для Generator)
+Чанкинг websites_updated.xlsx → chunks.csv
+Вход: data/raw/websites_updated.xlsx
+Выход: data/processed/chunks.csv
 
-Особенности:
-- Поддержка .xlsx
-- Контекстный префикс: kind: ...; title: ...; text: ...
-- Глубокая очистка мусора (?oirutpspid=, tel., footer)
+Особенности и изменения:
+- Работает с .xlsx (через openpyxl)
+- Контекстный префикс: "kind: {kind}; title: {title}; text: {text}"
+- Глубокая очистка: ?oirutpspid=, tel., footer-фразы, JSON-фрагменты
 - Чанкинг: 300 слов, overlap=60
+- Фильтрация коротких чанков (<50 симв.)
 - Дедупликация по MD5(text)
-- Сохранение JSONL в формате, совместимом с Generator
 """
+
 
 import argparse
 import os
@@ -22,6 +23,8 @@ import json
 from tqdm import tqdm
 import pandas as pd
 
+
+# --- Настройки очистки ---
 NOISE_PATTERNS = [
     r'\?oirutpspid=[^&\s]*',
     r'\?oirutpspsc=[^&\s]*',
@@ -35,10 +38,11 @@ NOISE_PATTERNS = [
     r'Москва', r'Россия',
     r'199\d–202\d',
     r'https?://[^\s]+\.(?:png|jpg|jpeg|gif|pdf)',
-    r'\{[^{}]*\}',
+    r'\{[^{}]*\}', # JSON-фрагменты
 ]
 
 def clean_text(s: str) -> str:
+    """Удаление HTML и шума"""
     if not isinstance(s, str):
         return ""
     for pattern in NOISE_PATTERNS:
@@ -51,12 +55,14 @@ def clean_text(s: str) -> str:
     return s.strip()
 
 def build_contextual_content(kind: str, title: str, text: str) -> str:
+    """Формирование контекстного контента"""
     kind = clean_text(kind)
     title = clean_text(title)
     text = clean_text(text)
     return f"kind: {kind}; title: {title}; text: {text}"
 
 def chunk_text_by_words(text: str, words_per_chunk: int = 300, overlap: int = 60) -> list[str]:
+    """Разбиение на чанки по словам"""
     if not text or len(text.strip()) < 20:
         return []
     words = text.split()
@@ -74,6 +80,7 @@ def chunk_text_by_words(text: str, words_per_chunk: int = 300, overlap: int = 60
     return chunks
 
 def hash_text(text: str) -> str:
+    """Хэширование текста для дедупликации"""
     return hashlib.md5(text.encode('utf-8', errors='ignore')).hexdigest()
 
 def main(args):
@@ -95,7 +102,7 @@ def main(args):
         try:
             web_id = int(r["web_id"])
         except (ValueError, TypeError):
-            continue
+            continue # пропускаем битые web_id
         title = str(r.get("title", "")).strip()
         url = str(r.get("url", "")).strip()
         kind = str(r.get("kind", "")).strip()
