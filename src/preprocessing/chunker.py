@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 # src/preprocessing/chunker.py
 """
-Чанкинг websites_updated.xlsx → chunks.csv
+Чанкинг websites_updated.xlsx → chunks.csv и chunks.jsonl
 Вход: data/raw/websites_updated.xlsx
-Выход: data/processed/chunks.csv
+Выход: data/processed/chunks.csv, data/processed/chunks.jsonl
 
 Особенности и изменения:
 - Работает с .xlsx (через openpyxl)
 - Контекстный префикс: "kind: {kind}; title: {title}; text: {text}"
 - Глубокая очистка: ?oirutpspid=, tel., footer-фразы, JSON-фрагменты (из конфига)
-- Чанкинг: 300 слов, overlap=60
+- Чанкинг: 300 слов, overlap=60 (пока не из конфига)
 - Фильтрация коротких чанков (<50 симв.)
 - Дедупликация по MD5(text)
 - НОВОЕ: статистика, безопасные проверки, конфигурация
 - НОВОЕ: метрики добавляются в конец CSV и JSONL
+- НОВОЕ: проверка на дубликаты chunk_id
+- НОВОЕ: логгирование в файл chunker.log
+- НОВОЕ: проверка длины text перед чанкингом
+- НОВОЕ: унификация clean_text
+- НОВОЕ: оба файла (CSV и JSONL) генерируются всегда
 """
 
 import argparse
@@ -21,8 +26,23 @@ import os
 import re
 import hashlib
 import json
+import logging
 from tqdm import tqdm
 import pandas as pd
+
+
+# --- Настройка логгирования ---
+def setup_logger(output_dir: str):
+    log_path = os.path.join(output_dir, "chunker.log")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.FileHandler(log_path, mode="w", encoding="utf-8"),
+            logging.StreamHandler()
+        ]
+    )
+    return logging.getLogger("chunker")
 
 
 # --- Загрузка NOISE_PATTERNS из конфига (в той же папке) ---
@@ -49,10 +69,10 @@ def load_noise_patterns(config_path: str = "src/preprocessing/noise_patterns.jso
                 config = json.load(f)
                 return config.get("noise_patterns", default_patterns)
             except Exception:
-                print(f"⚠️ Ошибка загрузки конфига {config_path}, используем стандартные паттерны")
+                print(f"Ошибка загрузки конфига {config_path}, используем стандартные паттерны")
                 return default_patterns
     else:
-        print(f"⚠️ Конфиг {config_path} не найден, используем стандартные паттерны")
+        print(f"Конфиг {config_path} не найден, используем стандартные паттерны")
         return default_patterns
 
 
@@ -72,12 +92,14 @@ def clean_text(s: str) -> str:
     s = re.sub(r'([.,;!?])\1+', r'\1', s)
     return s.strip()
 
+
 def build_contextual_content(kind: str, title: str, text: str) -> str:
     """Формирование контекстного контента"""
     kind = clean_text(kind)
     title = clean_text(title)
     text = clean_text(text)
     return f"kind: {kind}; title: {title}; text: {text}"
+
 
 def chunk_text_by_words(text: str, words_per_chunk: int = 300, overlap: int = 60) -> list[str]:
     """Разбиение на чанки по словам"""
@@ -97,37 +119,42 @@ def chunk_text_by_words(text: str, words_per_chunk: int = 300, overlap: int = 60
             break
     return chunks
 
+
 def hash_text(text: str) -> str:
     """Хэширование текста для дедупликации"""
     return hashlib.md5(text.encode('utf-8', errors='ignore')).hexdigest()
 
+
 def main(args):
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
 
-    print(f"Чтение {args.input}...")
+    logger = setup_logger(os.path.dirname(args.output))
+
+    logger.info(f"Чтение {args.input}...")
     df = pd.read_excel(args.input, engine="openpyxl")  # .xlsx
     required_cols = {"web_id", "url", "kind", "title", "text"}
     if not required_cols.issubset(set(df.columns)):
         raise SystemExit(f"Ожидались колонки: {required_cols}. Есть: {set(df.columns)}")
 
     # НОВОЕ: убираем dropna, проверяем в цикле
-    print(f"Обрабатываем {len(df)} документов")
+    logger.info(f"Обрабатываем {len(df)} документов")
 
     rows_csv = []
     rows_jsonl = []
 
     web_ids = set()
+    seen_chunk_ids = set()  # НОВОЕ: проверка дубликатов chunk_id
 
     for _, r in tqdm(df.iterrows(), total=len(df), desc="Чанкинг"):
         # Проверки
         web_id_raw = r.get("web_id")
         if pd.isna(web_id_raw):
-            print(f"⚠️ Пропуск строки: web_id пустой: {r.name}")
+            logger.warning(f"Пропуск строки: web_id пустой: {r.name}")
             continue
         try:
             web_id = int(web_id_raw)
         except (ValueError, TypeError):
-            print(f"⚠️ Пропуск строки: web_id не конвертируется в int: {web_id_raw}")
+            logger.warning(f"Пропуск строки: web_id не конвертируется в int: {web_id_raw}")
             continue
 
         title = r.get("title")
@@ -136,7 +163,7 @@ def main(args):
         raw_text = r.get("text")
 
         if pd.isna(title) or pd.isna(kind) or pd.isna(raw_text):
-            print(f"⚠️ Пропуск строки: один из обязательных полей пуст: {r.name}")
+            logger.warning(f"Пропуск строки: один из обязательных полей пуст: {r.name}")
             continue
 
         title = str(title).strip()
@@ -144,11 +171,23 @@ def main(args):
         kind = str(kind).strip()
         raw_text = str(raw_text).strip()
 
+        # НОВОЕ: проверка длины текста перед чанкингом
+        if len(raw_text) < 50:
+            logger.info(f"Пропуск строки: текст слишком короткий: {r.name}")
+            continue
+
         full_content = build_contextual_content(kind, title, raw_text)
         chunks = chunk_text_by_words(full_content, words_per_chunk=args.words_per_chunk, overlap=args.overlap)
 
         for i, chunk_text in enumerate(chunks):
             chunk_id = f"{web_id}__{i}"
+
+            # НОВОЕ: проверка дубликата chunk_id
+            if chunk_id in seen_chunk_ids:
+                logger.warning(f"Пропуск дубликата chunk_id: {chunk_id}")
+                continue
+            seen_chunk_ids.add(chunk_id)
+
             # для CSV
             rows_csv.append({
                 "web_id": web_id,
@@ -182,7 +221,7 @@ def main(args):
         unique_csv.append(csv_row)
         unique_jsonl.append(jsonl_row)
 
-    print(f"Удалено дубликатов: {len(rows_csv) - len(unique_csv)}")
+    logger.info(f"Удалено дубликатов: {len(rows_csv) - len(unique_csv)}")
 
     # --- СТАТИСТИКА ---
     chunks_count = len(unique_csv)
@@ -190,22 +229,22 @@ def main(args):
     avg_len = total_len / chunks_count if chunks_count > 0 else 0
     uniq_web_ids = len(web_ids)
 
-    print(f"📊 Статистика:")
-    print(f"   - Чанков: {chunks_count}")
-    print(f"   - Средняя длина: {avg_len:.2f}")
-    print(f"   - Уникальных web_id: {uniq_web_ids}")
+    logger.info(f"Статистика:")
+    logger.info(f"   - Чанков: {chunks_count}")
+    logger.info(f"   - Средняя длина: {avg_len:.2f}")
+    logger.info(f"   - Уникальных web_id: {uniq_web_ids}")
 
     # --- СОХРАНЕНИЕ CSV ---
     out_df = pd.DataFrame(unique_csv, columns=["web_id", "chunk_id", "title", "url", "kind", "text"])
     out_df.to_csv(args.output, index=False)
-    print(f"chunks.csv: {len(out_df)} чанков")
+    logger.info(f"chunks.csv: {len(out_df)} чанков")
 
     # --- ДОБАВЛЕНИЕ СТАТИСТИКИ В КОНЕЦ CSV ---
     with open(args.output, "a", encoding="utf-8") as f:
         f.write(f"\n#chunks_count,{chunks_count}\n")
         f.write(f"#avg_len,{avg_len:.2f}\n")
         f.write(f"#uniq_web_ids,{uniq_web_ids}\n")
-    print(f"✅ Метрики добавлены в конец {args.output}")
+    logger.info(f"Метрики добавлены в конец {args.output}")
 
     # --- СОХРАНЕНИЕ JSONL ---
     jsonl_path = args.output.replace(".csv", ".jsonl")
@@ -219,8 +258,8 @@ def main(args):
             "uniq_web_ids": uniq_web_ids
         }
         f.write(json.dumps(stats, ensure_ascii=False) + "\n")
-    print(f"chunks.jsonl: {len(unique_jsonl)} чанков → для Generator")
-    print(f"✅ Метрики добавлены в конец {jsonl_path}")
+    logger.info(f"chunks.jsonl: {len(unique_jsonl)} чанков → для Generator")
+    logger.info(f"Метрики добавлены в конец {jsonl_path}")
 
 
 if __name__ == "__main__":
