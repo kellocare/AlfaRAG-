@@ -1,93 +1,205 @@
-# alfaragultrabanger
+# RAG System for Question Answering
 
+## О проекте
 
+Проект разработан в рамках хакатона "Альфа-Будущее" от Альфа-Банка. Цель проекта — создание интеллектуального pipeline RAG-системы (Retrieval-Augmented Generation), которая по пользовательскому запросу находит наиболее релевантные фрагменты в корпусе данных.
 
-## Getting started
+## Задача
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+Разработать pipeline RAG-системы, которая:
+1. Принимает входной вопрос пользователя
+2. Находит релевантные фрагменты в предоставленном корпусе данных
+3. Возвращает топ-5 наиболее релевантных документов для каждого вопроса
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+## Архитектура RAG
 
-## Add your files
+Система работает по следующему принципу:
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+### 1. Индексирование
+- Текстовые данные разбиваются на чанки (chunks)
+- Для каждого чанка рассчитываются эмбеддинги
+- Строится векторный индекс для эффективного поиска
 
+### 2. Извлечение
+- Для запроса генерируются эмбеддинги
+- Выполняется поиск в векторном индексе
+- Возвращаются ближайшие чанки
+- Для повышения точности может использоваться переранжирование с cross-encoder
+
+### 3. Промптинг
+- Отобранные текстовые фрагменты передаются в языковую модель
+- Модель получает инструкцию использовать только данные из контекста
+
+### 4. Генерация
+- Языковая модель формирует финальный ответ
+- Сохраняется необходимый стиль и добавляются ссылки на источники
+
+## Данные
+
+Для работы системы используются два основных файла:
+
+### 1. Questions.csv
+- `q_id` — уникальный идентификатор вопроса
+- `query` — текст вопроса пользователя
+
+### 2. Websites.csv
+- `web_id` — уникальный идентификатор веб-страницы
+- `url` — адрес веб-страницы
+- `kind` — тип импортированных данных
+- `title` — заголовок страницы
+- `text` — спарсенный текст со страницы
+
+## Метрика качества
+
+Основная метрика оценки — **Hit@5**:
+- Показывает, у какой доли вопросов среди первых 5 найденных результатов присутствует хотя бы один релевантный элемент
+- Формула: `Hit@5 = (1/|Q|) * Σ hit@5(q)`, где Q — вопросы с релевантными страницами
+- Целевое значение: максимальное приближение к 1.0
+
+## Технические требования
+
+- Язык программирования: Python 3.10+
+- Разрешается использовать только OpenSource библиотеки
+- Запрещены закрытые библиотеки, частные API и неподходящий код
+
+## Структура решения
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/snezhana1337/alfaragultrabanger.git
-git branch -M main
-git push -uf origin main
+project/
+├── configs/
+│ └── default.yaml # Конфигурационные файлы
+├── data/
+│ ├── processed/ # Обработанные данные
+│ │ ├── .gitkeep
+│ │ ├── chunker.log
+│ │ ├── chunks.csv
+│ │ └── chunks.jsonl
+│ └── raw/ # Исходные данные
+│ ├── questions_clean.csv
+│ ├── websites_updated.csv
+│ └── websites_updated.xlsx
+├── submissions/ # Результаты для отправки
+│ └── sample_submission.csv
+├── docker/ # Docker конфигурации
+│ ├── Dockerfile
+│ └── docker-compose.yml
+├── src/ # Исходный код
+│ ├── api/ # API приложение
+│ │ └── app.py
+│ ├── embedding/ # Модуль эмбеддингов
+│ │ └── embedder.py
+│ ├── generator/ # Генерация ответов
+│ │ ├── generate.py
+│ │ └── prompt_templates.py
+│ ├── preprocessing/ # Предобработка данных
+│ │ ├── chunker.ipynb
+│ │ ├── chunker.py
+│ │ ├── clean.py
+│ │ ├── noise_patterns.json
+│ │ ├── read_xlsx.py
+│ │ └── reranker/ # Переранжирование
+│ │ ├── chunks_5_csv/
+│ │ ├── cross_encoder.py
+│ │ ├── re_rank.py
+│ │ ├── rerank_hit5_1.ipynb
+│ │ └── websites_to_reranker.ipynb
+│ └── retriever/ # Поисковый модуль
+│ └── indexer.py
+├── .gitignore
+├── Makefile # Автоматизация задач
+├── README.md # Документация
+├── repo-format.txt
+└── requirements.txt # Зависимости
 ```
 
-## Integrate with your tools
+## Архитектура RAG системы
 
-- [ ] [Set up project integrations](https://gitlab.com/snezhana1337/alfaragultrabanger/-/settings/integrations)
+### 1. Предобработка данных (`src/preprocessing/`)
+- **chunker.py** - разбиение текстов на чанки
+- **clean.py** - очистка и нормализация данных
+- **read_xlsx.py** - чтение данных из Excel файлов
 
-## Collaborate with your team
+### 2. Векторное представление (`src/embedding/`)
+- **embedder.py** - генерация эмбеддингов для текстов
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+### 3. Поисковый модуль (`src/retriever/`)
+- **indexer.py** - создание и работа с векторным индексом
 
-## Test and Deploy
+### 4. Переранжирование (`src/preprocessing/reranker/`)
+- **cross_encoder.py** - кросс-энкодер для точного ранжирования
+- **re_rank.py** - логика переранжирования результатов
 
-Use the built-in continuous integration in GitLab.
+### 5. Генерация ответов (`src/generator/`)
+- **generate.py** - генерация финальных ответов
+- **prompt_templates.py** - шаблоны промптов для LLM
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+### 6. API слой (`src/api/`)
+- **app.py** - веб-интерфейс для работы с системой
 
-***
+## Быстрый старт
 
-# Editing this README
+### Установка зависимостей
+```bash
+pip install -r requirements.txt
+```
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+### Предобработка данных
+```bash
+python src/preprocessing/chunker.py
+python src/preprocessing/clean.py
+```
 
-## Suggestions for a good README
+### Генерация эмбеддингов
+```bash
+python src/embedding/embedder.py
+```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+### Создание векторного индекса
+```bash
+python src/retriever/indexer.py
+```
 
-## Name
-Choose a self-explaining name for your project.
+### Запуск API
+```bash
+python src/api/app.py
+```
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+### Использование Docker
+```bash
+docker-compose up --build
+```
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+### Конфигурация
+Основные настройки системы находятся в configs/default.yaml
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+## Данные
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+### Входные данные (data/raw/)
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+- questions_clean.csv - очищенные вопросы пользователей
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+- websites_updated.csv - обновленная база знаний веб-страниц
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+### Промежуточные данные (data/processed/)
+- chunks.csv - разбитые на чанки тексты
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+- chunks.jsonl - чанки в формате JSONL
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+### Метрика качества
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+Основная метрика оценки — Hit@5:
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+- Показывает, у какой доли вопросов среди первых 5 найденных результатов присутствует хотя бы один релевантный элемент
 
-## License
-For open source projects, say how it is licensed.
+- Целевое значение: максимальное приближение к 1.0
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+### Результаты
+Файлы для отправки на платформу сохраняются в папке submissions/
+
+### Технические требования
+- Python 3.10+
+
+- Только OpenSource библиотеки
+
+- Запрещены закрытые API и неподходящий код
+
+||||||||||| Разработано для хакатона "Альфа-Будущее" в сотрудничестве с Альфа-Банком
